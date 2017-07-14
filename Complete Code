@@ -1,0 +1,680 @@
+''' Shell script to get the datafiles '''
+
+base="https://storage.googleapis.com/reddit_bigdataproject/new/subredd 
+
+its0000000000"  
+
+
+echo 'creating a folder called datafiles to store the csvs'  
+
+rm -rf datafiles  
+
+mkdir datafiles  
+
+cd datafiles  
+
+
+for i in `seq 0 9`;  
+
+do  
+
+echo "   
+
+
+processing $i of 38"  
+
+wget $base'0'$i  
+
+done  
+
+
+for i in `seq 10 38`;  
+
+do  
+
+echo "  
+
+
+processing $i of 38"  
+
+wget $base$i  
+
+done  
+
+
+''' Run the code to get 38 files ''' 
+
+$ chmod +x getdata.sh  
+
+$ ./getdata.sh  
+
+   
+
+''' Install pandas, numpy, matplotlib first '''
+
+$ sudo pip install --upgrade pip  
+
+$ sudo pip install pandas  
+
+$ sudo pip install numpy  
+
+$ sudo pip install matplotlib  
+
+
+# EXPLORATORY ANALYSIS ABOUT TOP SUBREDDITS AND VISUALIZATION  
+
+''' Code for calculating total number of subreddits based on the
+ information in the first file “subreddits000000000000”  '''
+
+''' configure SQL context  '''
+
+from pyspark.sql import SQLContext  
+
+sqlCtx = SQLContext(sc) 
+   
+
+''' read the first file as dataframe df1  '''
+
+df1 =  sqlCtx.jsonFile('file:/home/training/Downloads/datafiles/subreddits000 
+
+000000000').cache()  
+
+df1.registerTempTable("subrds1")  
+   
+
+''' calculate the total number of subreddits commented in 2015 (PS: Since many 
+“author”s are noted as “deleted”, so we removed those rows to check the number of  
+valid subreddits.)  '''
+
+numofsub = sqlCtx.sql("""  
+
+   SELECT distinct subreddit  
+
+   from subrds  
+
+   where author <> '[deleted]'  
+
+""").cache()  
+
+numofsub.count()  
+  
+
+''' Code for finding most popular subreddits in terms of number of comments 
+under the subreddit and average score of comments under that subreddit  '''
+   
+''' generate dataframe topDF1 about subreddit, number of comments under that
+ subreddit, average score of comments under that subreddit for the first file  '''  
+
+topDF1 = sqlCtx.sql("""  
+
+                 SELECT subreddit, COUNT(*) as cnt, AVG(score) as avgScore  
+
+                 from subrds1  
+
+                 where author <> '[deleted]'  
+
+                 group by subreddit  
+
+                 order by cnt desc  
+
+""").cache()  
+
+''' The same process was run 16 times by reading different files to dataframes  
+
+sequentially from subreddits000000000000 to subreddits000000000015 and creating  
+
+dataframes from topDF1 to topDF16.  '''
+
+
+
+''' Combine all 16 subreddit-related dataframes from topDF1 to topDF16 together  '''
+
+$ sudo pip install functools  
+
+Import functools    
+
+from functools import reduce  
+
+from pyspark.sql import DataFrame   
+
+def unionAll(*dfs):  
+
+               return reduce(DataFrame.unionAll, dfs)  
+               
+topcom =  unionAll(topDF1,topDF2,topDF3,topDF4,topDF5,topDF6,topDF7,topDF8,topDF9,topDF10,topDF11,topDF12,topDF13,topDF14,topDF15,topDF16).cache()  
+
+
+''' topcom is the combined dataframe, from which we need to get the total number of  
+
+comments for each subreddit and the average score of comments under that subreddit. ''' 
+
+topcom.registerTempTable("topcom")  
+
+topcomDF = sqlCtx.sql("""  
+
+        SELECT subreddit, sum(cnt) as totcnt, AVG(avgScore) as avg16Score  
+
+        from topcom  
+
+        group by subreddit  
+
+        order by totcnt desc  
+
+""").cache()  
+
+
+''' pick subreddits with top 20 number of comments from topcomDF  '''
+
+topcomDF.registerTempTable("topcomDF")  
+
+top20df = sqlCtx.sql("""  
+
+        SELECT *  
+
+        from topcomDF  
+
+        limit 20  
+
+""").cache()  
+
+
+''' change top20df to pandas dataframe  '''
+
+from pandas import Series, DataFrame  
+
+import pandas as pd  
+
+import numpy as np  
+
+   
+top20 = top20df.toPandas()  
+
+''' show 1 to 10  '''
+
+top20[:10]  
+
+''' show 11 to 20  '''
+
+top20[10:20]  
+
+
+''' Code for plotting the top 15 most popular subreddits in terms of number of  
+
+comments under the subreddit and average score of comments under that  
+
+subreddit  '''
+
+
+''' plot number of comments VS average score of comments for top 15 subreddits  '''
+
+top15df = sqlCtx.sql("""  
+
+        SELECT *  
+
+        from topcomDF  
+
+        limit 15  
+
+""").cache()  
+
+top15 = top15df.toPandas()  
+
+  
+''' import library   '''
+
+import matplotlib.pyplot as plt  
+
+from matplotlib import cm  
+
+
+''' set color schema  '''
+
+cmap = cm.get_cmap('Spectral')  
+
+''' set plot style  '''
+
+plt.style.use('ggplot')  
+
+''' plot subreddit as text on the graph  '''
+
+def label_point_orig(x, y, val, ax):  
+
+        a = pd.concat({'totcnt': x, 'avg16Score': y, 'subreddit': val},  axis=1)  
+
+        for i, point in a.iterrows():  
+
+        ax.text(point['totcnt'], point['avg16Score'],  
+
+str(point['subreddit']),fontsize=12, color='darkslategrey')  
+
+top15.plot('totcnt', 'avg16Score', kind='scatter', s=120, linewidth=0,  c=range(len(top15)), colormap=cmap)   
+
+label_point_orig(top15.totcnt, top15.avg16Score, top15.subreddit, plt)  
+
+plt.xlabel('number of comments')  
+
+plt.ylabel('average score of comments')  
+
+plt.title('Popular subreddit')  
+
+plt.show()  
+   
+
+'''Code for text mining -- N-grams -- most common terms in the comments of each popular subreddit  '''
+
+$ sudo pip install nltk  
+
+import nltk  
+
+from nltk.util import ngrams  
+
+import pandas as pd  
+   
+
+''' read first five files as dataframe  '''
+
+df1 =  sqlCtx.jsonFile('file:/home/training/Downloads/datafiles/subreddits000 
+
+000000000').cache()  
+
+df2 =  sqlCtx.jsonFile('file:/home/training/Downloads/datafiles/subreddits000 
+
+000000001').cache()  
+
+df3 =  sqlCtx.jsonFile('file:/home/training/Downloads/datafiles/subreddits000 
+
+000000002').cache()  
+
+df4 =  sqlCtx.jsonFile('file:/home/training/Downloads/datafiles/subreddits000 
+
+000000003').cache()  
+
+df5 =  sqlCtx.jsonFile('file:/home/training/Downloads/datafiles/subreddits000 
+
+000000004').cache()  
+  
+
+''' combine df1 to df5 together using reduce from functools library.  '''
+
+from functools import reduce   
+
+from pyspark.sql import DataFrame   
+
+def unionAll(*dfs): 
+
+        return reduce(DataFrame.unionAll, dfs)  
+
+dftot = unionAll(df1,df2,df3,df4,df5)  
+
+''' count total number of comments in the first 5 files  '''
+
+dftot.count() 
+
+''' filter out all comments under AskReddit  '''
+
+dftot.registerTempTable("subrds1")  
+
+text1 = sqlCtx.sql("""  
+
+SELECT *  
+
+from subrds1  
+
+where subreddit = "AskReddit"  
+
+""").cache()  
+
+
+''' change SQL spark dataframe to panda dataframe and split ‘body’ of comments to words list. '''
+
+text2 = text1.toPandas()  
+
+a = text2['body'].str.split().tolist()   
+
+''' use two dictionaries to capture the N-grams generated by ngrams function in two for loops  '''   
+
+his = dict()  
+
+hjs = dict()  
+
+j = 0  
+
+for i in range(0,len(a)):  
+
+                bigrams = ngrams(a[i],2)  
+
+                for gram in bigrams:  
+
+                hjs[j] = gram  
+
+                j += 1  
+
+his[i] = hjs  
+
+''' group by N-grams and count the number of times each N-grams appears in the comments under AskReddit, then order the result descendingly  '''
+
+s = pd.Series(his[0],index=his[0].keys())  
+
+term = s.groupby(s).count()  
+
+term.sort_values(ascending = False)  
+
+''' The same process was applied to NFL, funny, news subreddit as well.  '''
+
+''' TOP USERS AND COPYPASTA ANALYSIS  '''
+
+''' importing the required packages  '''
+
+import os  
+
+import json  
+
+from pyspark.sql import SQLContext  
+
+from pyspark.sql.functions import *  
+
+sqlContext = SQLContext(sc)  
+
+''' if the query is written through SqlContext.sql(), no direction function exists for calculating string length  '''
+
+''' defining function for string length  ''' 
+
+sqlContext.registerFunction("strlen",lambda x:  
+
+len(str(x.strip("\n").encode("utf8","ignore"))))  
+
+''' looping through the data files present   '''
+
+count = 0   
+
+''' data was located in the folder ‘datafiles’ '''
+
+''' adjust the path when re-running the code  '''
+
+for filename in os.listdir('datafiles')[:8]:  
+
+''' to keep track of progress  '''
+
+         print count  
+         
+''' change path accordingly   '''
+
+comments = sqlContext.jsonFile('file:/home/training/datafiles/' +  filename)  
+
+comments.registerTempTable("comments")  
+
+
+''' get the score per author and select top 500  '''  
+
+''' authors whose accounts were removed are filtered out  '''
+
+user_counts = sqlContext.sql("\  
+                    select author as author, sum(score) as tot_score\  
+
+                    from comments\  
+
+                    where author <> '[deleted]'\  
+
+                    group by author\  
+
+                    order by tot_score desc").limit(500)  
+
+       
+
+''' get the count per comment and select top 500  '''
+
+''' comments of at least 50 length is selected  '''
+
+comment_counts = sqlContext.sql("\  
+
+                  select lower(body) as comment, count(*) as cmt_cnt\  
+
+                  from comments\  
+
+                  where strlen(body)>=50\  
+
+                  group by body\  
+
+                  order by cmt_cnt desc").limit(500)  
+
+       
+
+''' checking for first run of loop  '''
+
+if count == 0:  
+
+    final_uc_df = user_counts  
+
+    final_uc_df.cache()  
+
+''' performing an action to ensure caching of final_uc_df  '''
+
+    print "%i %i" %(count, final_uc_df.count())  
+
+    final_cc_df = comment_counts  
+
+    final_cc_df.cache() 
+
+''' performing an action to ensure caching of final_uc_df  '''
+
+    print "%i %i" %(count, final_cc_df.count())        
+
+else:  
+
+    final_uc_df = unionAll(final_uc_df, user_counts)  
+
+    final_uc_df.cache()  
+   
+''' performing an action to ensure caching of final_uc_df  '''
+
+    print "%i %i" %(count, final_uc_df.count())  
+
+    final_cc_df = unionAll(final_cc_df, comment_counts)  
+
+    final_cc_df.cache()  
+
+''' performing an action to ensure caching of final_uc_df  '''
+
+    print "%i %i" %(count, final_cc_df.count())  
+    
+    count+=1 
+
+print "Done"  
+
+
+''' Fetching Final results  '''
+
+final_uc_df.registerTempTable("final_uc")  
+
+final_cc_df.registerTempTable("final_cc")  
+
+sqlContext.sql("""\select author, sum(tot_score) as totscore \  
+
+                from final_uc \  
+
+                group by author \  
+
+                order by totscore desc \  
+
+                limit 25 \  
+
+               """).collect()  
+
+sqlContext.sql("""\  
+
+                select comment, sum(cmt_cnt) as totscore \  
+
+                from final_cc \  
+
+                group by comment \  
+
+                order by totscore desc \  
+
+                limit 25 \  
+
+               """).collect()  
+
+# RECOMMENDATION SYSTEM   
+
+''' ALS Recommender (df loaded in the exploratory analysis section)  '''
+
+''' Producing ratings data  '''
+
+''' load user ID and subreddit ID mapping files '''
+
+user =  sc.textFile('file:/home/training/Downloads/author_mapping').map(lambda  
+
+line: line.split(','))  
+
+subr =  sc.textFile('file:/home/training/Downloads/subreddit_mapping').map(lam 
+
+bda line: line.split(','))  
+
+
+''' remove header and create dataframes  '''
+
+userh = user.take(1)[0]  
+
+subrh = subr.take(1)[0]  
+
+userRDD = user.filter(lambda line: line!=userh)  
+
+subRDD = subr.filter(lambda line: line!=subrh)  
+
+userdf = sqlCtx.createDataFrame(userRDD)  
+
+subdf = sqlCtx.createDataFrame(subRDD)  
+
+
+userdf.show(n=3)  
+
+df.registerTempTable("subrds")  
+
+userdf.registerTempTable("user")  
+
+subdf.registerTempTable("subreddit")  
+
+''' view top 10 subreddits '''
+topDF = sqlCtx.sql("""
+    SELECT subreddit, COUNT(*) as cnt, AVG(score) as avgScore
+    from subrds 
+    group by subreddit
+    order by cnt desc
+    limit 10
+""")
+
+topDF.show()
+
+# generate ratings using count of comments in each subreddit for each user
+
+rating = sqlCtx.sql("""  
+
+    SELECT author, subreddit, COUNT(*) as cnt  
+
+    from subrds   
+
+    where author <> '[deleted]'  
+
+    group by author, subreddit  
+
+    order by cnt desc  
+
+""")  
+
+  
+rating.show(2)
+
+rating.cache()
+
+rating.registerTempTable("rating")  
+
+  
+''' get user IDs and subreddit IDs '''
+
+rating1 = sqlCtx.sql("""  
+
+    SELECT r.author, u._2 as userId, r.subreddit, s._2 as subredditId, r.cnt  
+
+    from rating as r  
+
+    join user as u  
+
+    on r.author = u._1  
+
+    join subreddit as s  
+    on r.subreddit = s._1  
+
+""")  
+
+  
+rating1.show(2)
+
+rRDD = rating1.rdd.map(lambda line: (line[1],line[3],line[4])).cache()
+
+  
+''' split data into training data (80%) and validation data (20%) '''
+
+training_RDD, validation_RDD = rRDD.randomSplit([8, 2], seed=1234)
+training_RDD.cache()
+validation_for_predict_RDD = validation_RDD.map(lambda x: (x[0], x[1]))
+validation_for_predict_RDD.cache()
+
+rRDD.unpersist()
+rating.unpersist()
+
+
+''' Train ALS model  '''
+
+from pyspark.mllib.recommendation import ALS  
+
+import math  
+
+
+''' Build the recommendation model using Alternating Least Squares  '''
+
+rank = 5
+numIterations = 5
+model = ALS.train(training_RDD, rank, numIterations) 
+
+# Evaluate the model on training data  
+
+predictions = model.predictAll(validation_for_predict_RDD).map(lambda r: ((int(r[0]), int(r[1])), float(r[2])))
+ratesAndPreds = validation_RDD.map(lambda r: ((int(r[0]), int(r[1])), float(r[2]))).join(predictions).cache() 
+ 
+
+''' MAHOUT Recommender   '''
+
+'' (use same set of data as used for building Recommender using ALS on spark as input)  '''
+
+'' Creation of Hive table to store the rating information  '''
+
+DROP TABLE IF EXISTS reddit;  
+
+CREATE TABLE reddit(  
+
+        userID STRING,  
+
+        subredditid STRING,  
+
+        count FLOAT  
+
+        )  
+
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ‘,’  
+
+  
+''' Load data into hive table   '''
+
+LOAD DATA LOCAL INPATH home/training/processed_data_mahout.csv' INTO  
+
+TABLE reddit;  
+
+
+''' Mahout Recommendation building code    '''
+
+Mahout recommenditembased --input /user/hive/warehouse/reddit/*  
+
+--output reco_1 --similarityClassname SIMILARITY_PEARSON_CORRELATION  
+
+--numRecommendations 5 --tempDir temp;   
+
